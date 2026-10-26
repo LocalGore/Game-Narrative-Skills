@@ -556,10 +556,7 @@ def cmd_colorize(a):
             if not want or cur == want:
                 continue
             custom = cur and cur not in PALETTE            # e.g. a hex color the designer picked
-            hue_named = n.eff_owner == "hue" and cur and not a.force
             if custom and not a.force:
-                continue
-            if hue_named and n.status not in ("locked", "needs-hue"):
                 continue
             n.set("color", want)
             count += 1

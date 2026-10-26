@@ -12,16 +12,17 @@ color: blue
 title: guild_start
 tags: entry
 owner: claude
-status: review
+status: needs-hue
 position: 0,200
-color: blue
+color: orange
 ---
-Envoy: You're late. The Guild doesn't wait. #emotion:wary
+ENVOY: You're late. The Guild doesn't wait. #emotion:wary
+// @hue: Your haggle calls the player "m'Lord" and a "celebrity in the woods". Is that canon (a known figure)? If so, should this opener hint at it?
 <<set $met_envoy to true>>
 <<if $reputation_guild >= 3>>
-    Envoy: ...though for you, I'll make an exception.
+    ENVOY: ...though for you, I'll make an exception.
 <<else>>
-    Envoy: State your business or leave.
+    ENVOY: State your business or leave.
 <<endif>>
 -> "I came about the contract."
     <<jump ask_terms>>
@@ -31,7 +32,7 @@ Envoy: You're late. The Guild doesn't wait. #emotion:wary
     <<jump ask_terms>>
 -> "Not telling you."
     <<set $reputation_guild to $reputation_guild - 1>>
-    Envoy: Then we're done here. #emotion:cold
+    ENVOY: Then we're done here. #emotion:cold
     <<stop>>
 ===
 
@@ -41,7 +42,7 @@ status: needs-hue
 position: 320,200
 color: orange
 ---
-Envoy: Half upfront, half on delivery. No exceptions.
+ENVOY: Half upfront, half on delivery. No exceptions.
 The envoy slides a sealed ledger across the table.
 // @hue: Does the ledger matter later? If it does, this is where to plant it.
 -> "Deal."
@@ -52,21 +53,24 @@ The envoy slides a sealed ledger across the table.
 ===
 
 title: haggle
-owner: claude
-status: stub
+owner: hue
 position: 640,200
-color: blue
+color: green
 ---
-// TODO: Player pushes back. Envoy is amused, not offended. Costs the player gold or earns respect, depending on reputation.
+ENVOY: You forget yourself, m'Lord.
+ENVOY: You may be a celebrity in the woods. But here, my steel is justice.
+ENVOY: I am sure you will reconsider your positions. #emotion:amused
+<<play_sfx "ledger_slam">>
 <<jump accepted>>
 ===
 
 title: accepted
 owner: claude
-status: draft
+status: needs-hue
 position: 960,200
-color: blue
+color: orange
 ---
-Envoy: Then we understand each other.
+ENVOY: Then we understand each other.
+// @hue: After your haggle this lands as a threat; after "Deal." it reads neutral. If haggle sets a flag (say `<<set $haggled to true>>`), I can make this line react to it. Want that? I can't touch haggle, so it's your call.
 <<stop>>
 ===
