@@ -1,6 +1,6 @@
 {
   "name": "game-narrative-skills",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Game narrative agents and skills: branching dialogue, lore bible, quest/event scripting, and Unity-ready export. Start a session with the narrative-director agent.",
   "author": {
     "name": "Hue"

@@ -1,4 +1,8 @@
 title: Declarations
+owner: claude
+status: draft
+position: 0,0
+color: blue
 ---
 <<declare $met_envoy = false>>
 <<declare $reputation_guild = 0>>
@@ -7,13 +11,17 @@ title: Declarations
 
 title: guild_start
 tags: entry
+owner: claude
+status: review
+position: 0,200
+color: blue
 ---
-ENVOY: You're late. The Guild doesn't wait. #emotion:wary
+Envoy: You're late. The Guild doesn't wait. #emotion:wary
 <<set $met_envoy to true>>
 <<if $reputation_guild >= 3>>
-ENVOY: ...though for you, I'll make an exception.
+    Envoy: ...though for you, I'll make an exception.
 <<else>>
-ENVOY: State your business or leave.
+    Envoy: State your business or leave.
 <<endif>>
 -> "I came about the contract."
     <<jump ask_terms>>
@@ -23,14 +31,19 @@ ENVOY: State your business or leave.
     <<jump ask_terms>>
 -> "Not telling you."
     <<set $reputation_guild to $reputation_guild - 1>>
-    ENVOY: Then we're done here. #emotion:cold
+    Envoy: Then we're done here. #emotion:cold
     <<stop>>
 ===
 
 title: ask_terms
+owner: claude
+status: needs-hue
+position: 320,200
+color: orange
 ---
-ENVOY: Half upfront, half on delivery. No exceptions.
+Envoy: Half upfront, half on delivery. No exceptions.
 The envoy slides a sealed ledger across the table.
+// @hue: Does the ledger matter later? If it does, this is where to plant it.
 -> "Deal."
     <<set $reputation_guild to $reputation_guild + 1>>
     <<jump accepted>>
@@ -39,14 +52,21 @@ The envoy slides a sealed ledger across the table.
 ===
 
 title: haggle
+owner: claude
+status: stub
+position: 640,200
+color: blue
 ---
-ENVOY: Brave. Foolish, but brave. #emotion:amused
-<<play_sfx "ledger_slam">>
+// TODO: Player pushes back. Envoy is amused, not offended. Costs the player gold or earns respect, depending on reputation.
 <<jump accepted>>
 ===
 
 title: accepted
+owner: claude
+status: draft
+position: 960,200
+color: blue
 ---
-ENVOY: Then we understand each other.
+Envoy: Then we understand each other.
 <<stop>>
 ===

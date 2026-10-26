@@ -1,35 +1,29 @@
 ---
 name: unity-narrative-export
-description: Deliver dialogue to Unity as Yarn Spinner scripts, keep it localization-friendly, and wire it into a project. Load when moving narrative into a Unity project or when the designer asks for .yarn files.
+description: Get shared Yarn Spinner scripts into a Unity project cleanly: variables, custom commands, localization line tags, and pre-delivery checks. Load when moving narrative into Unity or preparing .yarn files for the game.
 ---
 
 # Unity Narrative Export (Yarn Spinner)
 
-Yarn Spinner (`.yarn`) is the default and preferred format. Other formats (Ink, JSON) only if the designer asks.
+The `.yarn` files in `narrative/yarn/` are what the game imports. There is nothing to convert. This skill covers what has to be true about them before and after they reach Unity.
 
-## Workflow
+## Where files live
 
-1. Draft and revise in the pseudo-code from `branching-dialogue` while chatting.
-2. When a scene is approved (or the designer asks for files), save it as `narrative/scripts/<scene>.dlg`.
-3. Convert with `branching-dialogue/scripts/pseudo2yarn.py` to `narrative/yarn/<scene>.yarn`. Fix lint errors in the `.dlg`.
-4. Tell the designer the output path and any warnings. Do not paste the Yarn into chat unless asked.
+Keep `narrative/yarn/` as the source. Either point the Unity project at it (symlink or copy step) or keep a `Assets/` subfolder as the source and treat `narrative/` as a pointer to it. Ask the designer which, and match the project's existing layout. Do not keep two divergent copies.
 
-If the Unity project already has a Yarn folder, put output there instead and match its naming.
+## Before handing off
 
-## Variables
-
-- Declarations are emitted as a `Declarations` node at the top of the file. Yarn rejects duplicate declarations, so keep shared variables in one `globals.dlg` and pass `--vars-file globals.dlg` when converting other scenes.
-- Variables the game code reads or writes (gold, reputation) must match the C# variable storage names exactly, with `$` added in Yarn.
+1. `yarnctl lint narrative/yarn --ysc` (the compiler check runs only if `ysc` is installed; otherwise the designer's VS Code Problems panel is the check).
+2. Every `$variable` is declared once. Variables the game code reads or writes (gold, reputation) must match the C# variable storage names exactly, with `$` added in Yarn.
+3. Every custom command (`<<name args>>`) has a handler in C# (`[YarnCommand]` or `DialogueRunner.AddCommandHandler`). List every custom command used in a scene.
+4. No leftover `// TODO:` stubs or `// @claude` / `// @hue` comments in files going to a build. `status` lists them. Stubs and nodes marked `needs-hue` are unfinished.
+5. Positions, colors, `owner`, and `status` headers are harmless to the game. Leave them in.
 
 ## Localization
 
-- Do not hand-write line ids. In Unity, use the Yarn Spinner "Add Line Tags to Yarn Scripts" tool on the generated files, then export the string table for translators.
-- Because `.yarn` is regenerated from `.dlg`, add line tags once the script is stable. Re-tagging after large rewrites can orphan translations, so avoid regenerating tagged files; edit tagged `.yarn` by hand only for small fixes and mirror them in the `.dlg`.
-- Keep one sentence per line where possible and avoid string concatenation that breaks other languages.
-
-## Custom commands
-
-`(call name args)` becomes `<<name args>>`. The designer must register matching command handlers in C# (`[YarnCommand]` or `DialogueRunner.AddCommandHandler`). List every custom command used in a scene when delivering it.
+- Do not hand-write line ids. In Unity, use the Yarn Spinner "Add Line Tags to Yarn Scripts" tool once a scene is stable, then export the string table for translators.
+- Line tags (`#line:...`) are part of the file once added. After that, rewriting a line orphans its translation, so edit text in place rather than deleting and recreating nodes, and say so when a change affects tagged lines.
+- Keep one sentence per line where possible and avoid building sentences from variables, which breaks other languages.
 
 ## Testing in the Unity editor
 

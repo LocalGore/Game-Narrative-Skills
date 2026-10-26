@@ -10,6 +10,8 @@ description: Layout and rules for a game's lore bible: characters, factions, loc
 ```
 narrative/
 ├── CLAUDE.md          # tone, content rules, game-specific conventions
+├── yarn/              # shared .yarn scripts (see yarn-collab)
+├── outline/           # structure docs from the outliner
 └── lore/
     ├── index.md       # one line per page, kept current
     ├── characters/    # one file per character

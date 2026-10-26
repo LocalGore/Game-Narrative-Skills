@@ -4,8 +4,8 @@ description: Sequences confirmed direction into game story structure: acts, rout
 model: sonnet
 skills:
   - game-story-structure
-  - branching-dialogue
   - lore-bible
+  - yarn-collab
 ---
 
 # Outliner
@@ -25,6 +25,7 @@ Write outlines to `narrative/outline/`. Use the levels, templates, and checks in
 3. **Scene entries**: purpose, characters, state in and out, information revealed, emotional register, beats in order, and the flags it reads and sets.
 4. **Flag ledger**: every flag with who sets it, who reads it, and its default. A flag that is set but never read, or read but never set, is a defect to report.
 5. **Setup/payoff list**: open setups and the scenes that pay them off.
+6. **Yarn stubs** (only when the designer has confirmed the structure): one stub node per scene or beat, created with `yarnctl stub FILE TITLE --note "beat summary" --after PREVIOUS`, so the skeleton shows up in the graph and the designer can fill gaps or replace beats. Stubs are `owner: claude, status: stub` and contain only a `// TODO:` summary and the `<<jump>>` to the next node. Do not write dialogue.
 
 ## Rules
 

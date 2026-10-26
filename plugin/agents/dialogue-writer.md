@@ -5,6 +5,7 @@ model: sonnet
 skills:
   - game-narrative-craft
   - branching-dialogue
+  - yarn-collab
 ---
 
 # Dialogue Writer
@@ -16,13 +17,14 @@ Write the text the brief asks for, in the voices the lore bible and character pa
 - Scene goal and player-facing effect
 - Speakers, with voice notes (read the character pages if paths are given)
 - Branch constraints: required choices, state variables, exits
+- The target file and the nodes you may edit
 - Length budget and where the text will appear (dialogue box, card text, tooltip, bark)
 
 If any of these is missing and it matters, say what you assumed at the top of your output.
 
 ## Output
 
-Write in the pseudo-code format defined in `branching-dialogue` (never raw Yarn). The director converts it. Mark every line that reads or writes a variable. Offer one alternate take only when asked.
+Write native Yarn Spinner nodes directly into the file the brief names (see `branching-dialogue` for syntax and `yarn-collab` for headers). Every node you create or change gets `owner: claude` and a `status`. Never edit a node owned by the designer (`owner: hue` or no owner) or marked `locked`; if the brief seems to require it, stop and say so. Declare any new variable. Run `yarnctl lint` on the file before you finish and report any custom commands you used. Offer an alternate take only when asked.
 
 ## Standards
 

@@ -1,67 +1,52 @@
 ---
 name: branching-dialogue
-description: Readable pseudo-code format for branching dialogue, events, and quests, plus a converter to Yarn Spinner. Load when writing or reviewing anything with player choices, or when converting scripts to .yarn.
+description: Writing branching dialogue, events, and quests directly in Yarn Spinner syntax, with choice-design rules and structure patterns. Load when writing or reviewing anything with player choices.
 ---
 
-# Branching Dialogue
+# Branching Dialogue (Yarn Spinner)
 
-Draft and discuss in the pseudo-code below (easy to read in chat). Save approved scenes as `.dlg` files and convert to Yarn with `scripts/pseudo2yarn.py`. A full example is in `examples/guild_meeting.dlg` and its generated `examples/guild_meeting.yarn`.
+Write native Yarn. There is no intermediate format. The files are shared with the designer, so follow `yarn-collab` for headers, ownership, and comments. A full example is in `examples/guild_meeting.yarn`.
 
-## Pseudo-code format
-
-```
-VARS
-  met_envoy: bool = false
-  gold: int = 25
-
-== node_id == #entry #tag
-SPEAKER: [emotion] Dialogue line.
-Narration line with no speaker.
-(set met_envoy = true)
-(gold -= 10)
-(call play_sfx "door")
-
-(if gold >= 10)
-  SPEAKER: Branch text.
-(elif met_envoy)
-  SPEAKER: Other text.
-(else)
-  SPEAKER: Fallback.
-(end)
-
-> "Choice text."                          -> target_node
-> "Pay." {if gold >= 10} {gold -= 10}     -> target_node
-> "Refuse." {reputation -= 1}
-    SPEAKER: Inline reply under the choice.
-    -> END
-
--> other_node       // standalone jump; -> END ends the conversation
-```
-
-Rules:
-- Speakers are ALL CAPS before a colon. Lines without one are narration.
-- `[emotion]` after the speaker becomes a `#emotion:` line tag in Yarn.
-- Choices: `{if cond}` gates a choice; any other `{...}` is an effect that runs when picked; `-> target` jumps. Indented lines below a choice are its inline body.
-- A choice with no `->` and no body falls through to whatever follows the choice group (the bottleneck pattern).
-- Effects: `x = v`, `x += n`, `x -= n` (optionally prefixed with `set`). Conditions use `and`/`or`/`not` or `&&`/`||`/`!`.
-- `(call name args)` becomes a custom Yarn command, for example `<<play_sfx "door">>`.
-- Node ids are `snake_case` and unique. `#entry` marks a node called from outside the file.
-- Every variable is declared once in `VARS`. Shared variables live in one file; other files pass it with `--vars-file`.
-
-## Converting
-
-Run after the designer approves a scene, or whenever they ask for the file:
+## Syntax you will use
 
 ```
-python3 -I <skill-dir>/scripts/pseudo2yarn.py scene.dlg -o scene.yarn
-python3 -I <skill-dir>/scripts/pseudo2yarn.py scene.dlg --lint-only
-python3 -I <skill-dir>/scripts/pseudo2yarn.py scene.dlg --vars-file globals.dlg -o scene.yarn
-python3 -I <skill-dir>/scripts/pseudo2yarn.py scene.dlg --speaker-case title -o scene.yarn
+title: node_id
+owner: claude
+status: draft
+---
+Envoy: You're late. The Guild doesn't wait. #emotion:wary
+The envoy slides a sealed ledger across the table.     // narration: a line with no "Name:"
+
+<<set $met_envoy to true>>
+<<set $gold to $gold - 10>>
+
+<<if $reputation_guild >= 3>>
+    Envoy: ...though for you, I'll make an exception.
+<<else>>
+    Envoy: State your business or leave.
+<<endif>>
+
+-> "I came about the contract."
+    <<jump ask_terms>>
+-> "Here. For your trouble." <<if $gold >= 10>>
+    <<set $gold to $gold - 10>>
+    <<jump ask_terms>>
+-> "Not telling you."
+    Envoy: Then we're done here.
+    <<stop>>
+
+<<play_sfx "ledger_slam">>      // custom command, needs a C# handler
+===
 ```
 
-The script lints as it converts: unknown jump targets, undeclared variables, duplicate nodes, dead ends, unreachable nodes, and variables never set or never read. Errors stop the conversion; fix them in the `.dlg` source, never by hand-editing the `.yarn`. The `.dlg` is the source of truth; regenerate `.yarn` after every edit.
+- `Name: text` is dialogue; text without a name is narration. Line tags start with `#` (for example `#emotion:cold`).
+- `->` starts an option. Lines indented under it run when it is chosen. A `<<if ...>>` on the option line hides it unless true.
+- `<<jump node>>` goes to a node and does not return. `<<detour node>>` runs a node and comes back. `<<stop>>` ends the dialogue.
+- Variables start with `$`. Declare each once: `<<declare $gold = 25>>`, ideally in one `Declarations` node per project. Use `{$gold}` to insert a value in a line.
+- `//` starts a comment. Comments are also how you and the designer talk to each other (see `yarn-collab`).
+- `<<name args>>` calls a custom command the game must implement. List every one you use.
 
-The converter has not been run against Yarn Spinner's own compiler. After a first conversion in a real project, open the `.yarn` in Unity and fix any converter gaps in the script.
+When unsure about a feature, say so and check the Yarn Spinner docs rather than guessing syntax. A scene that does not compile is worse than a plainer one.
 
 ## Choice design
 
@@ -74,11 +59,14 @@ The converter has not been run against Yarn Spinner's own compiler. After a firs
 ## Structure patterns
 
 - **Bottleneck**: branches diverge, then reconverge at a fixed node. Cheapest to write and test.
-- **Gated**: later nodes check flags set earlier; declare every flag in `VARS`.
-- **Hub**: a node the player returns to, with options that disappear once used (track with a flag per option).
+- **Gated**: later nodes check flags set earlier; declare every flag.
+- **Hub**: a node the player returns to, with options that disappear once used (one flag per option).
+
+Keep one beat per node and name nodes for what happens (`guild_haggle`, not `node_7`). Small nodes make the graph readable and give the designer something to replace.
 
 ## Review checklist
 
-- Every node reachable? Every flag both set and read?
-- Any dead ends that are not `END`?
+- Every node reachable (or tagged `entry`)? Run `yarnctl lint`.
+- Every flag both set and read?
 - Does each branch deliver something different by the next bottleneck?
+- Any option text that makes a promise the next node does not keep?
