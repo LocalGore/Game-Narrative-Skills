@@ -1,0 +1,52 @@
+title: Declarations
+---
+<<declare $met_envoy = false>>
+<<declare $reputation_guild = 0>>
+<<declare $gold = 25>>
+===
+
+title: guild_start
+tags: entry
+---
+ENVOY: You're late. The Guild doesn't wait. #emotion:wary
+<<set $met_envoy to true>>
+<<if $reputation_guild >= 3>>
+ENVOY: ...though for you, I'll make an exception.
+<<else>>
+ENVOY: State your business or leave.
+<<endif>>
+-> "I came about the contract."
+    <<jump ask_terms>>
+-> "Here. For your trouble." <<if $gold >= 10>>
+    <<set $gold to $gold - 10>>
+    <<set $reputation_guild to $reputation_guild + 1>>
+    <<jump ask_terms>>
+-> "Not telling you."
+    <<set $reputation_guild to $reputation_guild - 1>>
+    ENVOY: Then we're done here. #emotion:cold
+    <<stop>>
+===
+
+title: ask_terms
+---
+ENVOY: Half upfront, half on delivery. No exceptions.
+The envoy slides a sealed ledger across the table.
+-> "Deal."
+    <<set $reputation_guild to $reputation_guild + 1>>
+    <<jump accepted>>
+-> "Too steep."
+    <<jump haggle>>
+===
+
+title: haggle
+---
+ENVOY: Brave. Foolish, but brave. #emotion:amused
+<<play_sfx "ledger_slam">>
+<<jump accepted>>
+===
+
+title: accepted
+---
+ENVOY: Then we understand each other.
+<<stop>>
+===
