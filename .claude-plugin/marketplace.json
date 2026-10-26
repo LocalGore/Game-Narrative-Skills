@@ -1,0 +1,17 @@
+{
+  "name": "gn",
+  "owner": {
+    "name": "Hue"
+  },
+  "metadata": {
+    "description": "Game narrative agents and skills for Claude Code and Cowork",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "game-narrative-skills",
+      "description": "Agents and skills for writing game narrative: branching dialogue, lore bibles, quest and event scripts, and Unity-ready export. The narrative-director agent is the entry point.",
+      "source": "./plugin"
+    }
+  ]
+}

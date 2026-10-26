@@ -5,7 +5,7 @@ A Claude Code / Cowork plugin for writing game narrative: branching dialogue, ev
 ## Install
 
 ```
-/plugin marketplace add <your-github-user>/game-narrative-skills
+/plugin marketplace add LocalGore/Game-Narrative-Skills
 /plugin install game-narrative-skills@gn
 ```
 
