@@ -56,7 +56,8 @@ See `plugin/skills/yarn-collab/SKILL.md` for the full conventions.
 ```
 status   PATH...      nodes, owners, open comments, sticky notes, gaps, lint
 lint     PATH...      errors only; --ysc also runs the Yarn compiler if installed
-layout   PATH...      position nodes that lack a position, around ones you already placed
+layout   PATH...      top-down layout (spine, detours, hub lanes) for nodes that lack a position
+preview  PATH...      draw current positions to an SVG for a quick look
 adopt    PATH...      nodes you added in the graph (no owner) are recorded as yours
 colorize PATH...      color by owner and status
 header   FILE TITLE   set or remove node headers

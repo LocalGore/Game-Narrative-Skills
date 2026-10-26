@@ -89,7 +89,8 @@ Run with `python3 -I <this skill's folder>/scripts/yarnctl.py <command>`. If the
 |---|---|
 | `status PATH...` | node table, open comments, sticky notes, gaps, lint (`--json` available) |
 | `lint PATH... [--ysc]` | errors only, exit 1 on error; optionally run `ysc compile` |
-| `layout PATH... [--relayout] [--dx N --dy N]` | set `position` for nodes lacking it, anchored to nodes already placed |
+| `layout PATH... [--relayout] [--report] [--hub-min N] [--detour-side left\|right]` | set `position` for nodes lacking it, anchored to nodes already placed; `--report` prints crossings and overlaps |
+| `preview PATH... [--out graph.svg]` | draw the current positions as an SVG to check a layout without opening VS Code |
 | `adopt PATH...` | ownerless nodes become `owner: hue` |
 | `colorize PATH... [--force]` | color from owner and status |
 | `header FILE TITLE key=value... [--remove key]` | set or remove node headers |
@@ -105,3 +106,15 @@ Edit node text with the normal Edit tool. Use `header` rather than hand-editing 
 - Turn-based; you cannot see the graph, only the files. Positions come from the flow (entry nodes on the left, branches fanned out, jumps flowing right), not from how the graph looks on screen.
 - Not yet verified against the extension: that it leaves unknown headers (`owner`, `status`) untouched when the designer edits in the graph. If it strips them, tell the designer; the fallback is to put ownership in `tags` or `cluster`.
 - The designer picks hex colors with the extension's color picker; `colorize` leaves those alone.
+
+## How `layout` arranges the graph
+
+Top-down, like the graph view's edges (out of the bottom, into the top):
+
+- **Spine**: the main path runs straight down. Declaration-only nodes sit above the start.
+- **Detour**: a node that only fits between two points of the spine (like a haggle) sits beside the spine, on the left by default.
+- **Hub and lanes**: when 3+ jumps return to one node, each branch below it gets its own column, in the order the hub lists its options. Return-to-hub jumps are ignored for placement.
+- **Endings** fall to the bottom of their branch.
+- **Entry**: a node tagged `start` or `entry` is the root.
+
+Only nodes without a `position` are placed, anchored to ones the designer already arranged. `--relayout` rearranges everything except `layout: pinned`, so ask first. After a large layout, run `layout --report` and `preview` and look at the result before telling the designer it is tidy.

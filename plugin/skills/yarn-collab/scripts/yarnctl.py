@@ -7,7 +7,7 @@ it edits node headers in place and leaves every other byte of the file alone.
 Commands (PATH is a .yarn file or a folder searched recursively):
   status   PATH...            node table, open @claude/@hue comments, sticky notes, gaps, lint
   lint     PATH... [--ysc]    errors only; exit 1 on errors; --ysc also runs the Yarn compiler if installed
-  layout   PATH... [--relayout] [--dx N --dy N]
+  layout   PATH... [--relayout] [--report] [--dx N --dy N] [--hub-min N] [--detour-side left|right]
                               set `position:` for nodes that lack one (or all, with --relayout)
   adopt    PATH...            give nodes with no `owner:` the owner `hue` (run at the start of a pass)
   colorize PATH... [--force]  color nodes by owner/status
@@ -27,7 +27,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from collections import defaultdict
+from collections import defaultdict, deque
 
 sys.setrecursionlimit(10000)
 
@@ -307,7 +307,7 @@ def analyze(files):
                 indeg[t] += 1
     for t, ns in by_title.items():
         n = ns[0]
-        if indeg[t] == 0 and "entry" not in n.tags and not n.is_declarations():
+        if indeg[t] == 0 and not ({"entry", "start"} & set(n.tags)) and not n.is_declarations():
             warnings.append(f"{t}: nothing jumps here (add `tags: entry` if the game starts it)")
     reads, writes, decls = set(), set(), set()
     for n in nodes:
@@ -413,67 +413,359 @@ def cmd_lint(a):
 
 
 # ------------------------------------------------------------------ layout
+#
+# Layered (Sugiyama-style) top-down layout with a few story-specific rules:
+#   * jump edges that point back up (the "return to hub" loops) do not shape the layout
+#   * a one-node detour (a node whose children are all one hop from one of its parents,
+#     like a haggle between "ask" and "accepted") sits beside the spine at the midpoint,
+#     instead of stretching the spine
+#   * if a hub exists (3+ jumps returning to one node), each branch below it stays a
+#     contiguous column ("lane"), ordered as the hub lists its options
+#   * declaration-only nodes sit directly above the first start node
+# Spacing defaults come from a layout the designer drew by hand in the graph view.
 
-def compute_layout(nodes, dx, dy):
-    ns = [n for n in nodes if n.title and not n.is_note]
-    titles = [n.title for n in ns]
-    tset = set(titles)
-    out = {t: [] for t in titles}
-    for n in ns:
-        for tgt in n.targets():
-            if tgt in tset and tgt != n.title and tgt not in out[n.title]:
-                out[n.title].append(tgt)
+NODE_W, NODE_H = 200, 125            # approximate card size in graph units
+
+
+def _weighted_isotonic(vals, weights):
+    blocks = []                      # [value, weight, count]
+    for v, w in zip(vals, weights):
+        blocks.append([v, w, 1])
+        while len(blocks) > 1 and blocks[-2][0] > blocks[-1][0]:
+            v2, w2, c2 = blocks.pop()
+            v1, w1, c1 = blocks.pop()
+            blocks.append([(v1 * w1 + v2 * w2) / (w1 + w2), w1 + w2, c1 + c2])
+    out = []
+    for v, _, c in blocks:
+        out += [v] * c
+    return out
+
+
+def _count_crossings(rows, chi):
+    pos = {}
+    for row in rows:
+        for i, v in enumerate(row):
+            pos[v] = i
+    total = 0
+    for row in rows[:-1]:
+        es = sorted((pos[a], pos[b]) for a in row for b in chi[a])
+        if len(es) > 1500:
+            continue
+        for i in range(len(es)):
+            for j in range(i + 1, len(es)):
+                if es[i][0] < es[j][0] and es[i][1] > es[j][1]:
+                    total += 1
+    return total
+
+
+def build_layout(nodes, dx, dy, hub_min=3, detour_left=True):
+    ns, seen = [], set()
+    for n in nodes:
+        if n.title and not n.is_note and n.title not in seen:
+            seen.add(n.title)
+            ns.append(n)
+    info = {"hub": None, "lanes": 0, "back_edges": 0, "detours": [], "ranks": 0}
+    if not ns:
+        return {}, info
+    by = {n.title: n for n in ns}
+    decl = [n.title for n in ns if n.is_declarations()]
+    graph = [n.title for n in ns if n.title not in decl]
+    pos = {}
+    if not graph:
+        for k, t in enumerate(decl):
+            pos[t] = (k * dx, 0)
+        return pos, info
+
+    gset = set(graph)
+    out = {t: [] for t in graph}
+    for t in graph:
+        for tg in by[t].targets():
+            if tg in gset and tg != t and tg not in out[t]:
+                out[t].append(tg)
     indeg = defaultdict(int)
-    for t in titles:
+    for t in graph:
         for v in out[t]:
             indeg[v] += 1
-    roots = [n.title for n in ns if "entry" in n.tags or indeg[n.title] == 0]
-    state, back, order = {}, set(), []
+    starts = [t for t in graph if {"start", "entry"} & set(by[t].tags)]
+    roots = starts + [t for t in graph if indeg[t] == 0 and t not in starts]
 
-    def dfs(u):
-        state[u] = 1
-        for v in out[u]:
-            if state.get(v) == 1:
-                back.add((u, v))
-            elif v not in state:
-                dfs(v)
-        state[u] = 2
-        order.append(u)
+    # iterative DFS: back edges, discovery order, post order
+    state, back, disc, post = {}, set(), {}, []
+    for r in roots + graph:
+        if r in state:
+            continue
+        state[r] = 1
+        disc[r] = len(disc)
+        stack = [(r, iter(out[r]))]
+        while stack:
+            u, it = stack[-1]
+            for v in it:
+                if state.get(v) == 1:
+                    back.add((u, v))
+                elif v not in state:
+                    state[v] = 1
+                    disc[v] = len(disc)
+                    stack.append((v, iter(out[v])))
+                    break
+            else:
+                state[u] = 2
+                post.append(u)
+                stack.pop()
+    info["back_edges"] = len(back)
+    dag_out = {t: [v for v in out[t] if (t, v) not in back] for t in graph}
+    dag_in = defaultdict(list)
+    for t in graph:
+        for v in dag_out[t]:
+            dag_in[v].append(t)
 
-    for r in roots:
-        if r not in state:
-            dfs(r)
-    for t in titles:
-        if t not in state:
-            dfs(t)
-    layer = {t: 0 for t in titles}
-    for u in reversed(order):
-        for v in out[u]:
-            if (u, v) not in back:
+    # one-node detours: every child is also one hop from one of the node's parents
+    side = set()
+    for d in graph:
+        ps, cs = dag_in[d], dag_out[d]
+        if not ps or not cs:
+            continue
+        if d in side or any(p in side for p in ps) or any(c in side for c in cs):
+            continue
+        if all(any(c in dag_out[p] for p in ps) for c in cs):
+            side.add(d)
+
+    # layering by longest path, detours excluded; demote a detour that has no room
+    rank_of = {}
+    for _ in range(6):
+        layer = {t: 0 for t in graph if t not in side}
+        for u in reversed(post):
+            if u in side:
+                continue
+            for v in dag_out[u]:
+                if v not in side:
+                    layer[v] = max(layer[v], layer[u] + 1)
+        bad, srank = [], {}
+        for d in side:
+            lo = max(layer[p] for p in dag_in[d])
+            hi = min(layer[c] for c in dag_out[d])
+            if hi - lo >= 1:
+                srank[d] = (lo + hi) / 2.0
+            else:
+                bad.append(d)
+        if not bad:
+            rank_of = dict(layer)
+            rank_of.update(srank)
+            break
+        side -= set(bad)
+    else:
+        side = set()
+        layer = {t: 0 for t in graph}
+        for u in reversed(post):
+            for v in dag_out[u]:
                 layer[v] = max(layer[v], layer[u] + 1)
-    parents = defaultdict(list)
-    for u in titles:
-        for v in out[u]:
-            if (u, v) not in back:
-                parents[v].append(u)
-    idx = {t: i for i, t in enumerate(titles)}
-    pos = {}
-    for L in range(max(layer.values(), default=0) + 1):
-        col = [t for t in titles if layer[t] == L]
-        want = {}
-        for t in col:
-            ys = [pos[p][1] for p in parents[t] if p in pos]
-            want[t] = sum(ys) / len(ys) if ys else None
-        col.sort(key=lambda t: (want[t] if want[t] is not None else 1e9, idx[t]))
-        prev = None
-        for t in col:
-            w = want[t]
-            if w is None:
-                w = 0 if prev is None else prev + dy
-            y = w if prev is None else max(w, prev + dy)
-            pos[t] = (L * dx, y)
-            prev = y
-    return pos
+        rank_of = dict(layer)
+    info["detours"] = [t for t in graph if t in side]
+    rank_vals = sorted(set(rank_of.values()))
+    ridx = {v: i for i, v in enumerate(rank_vals)}
+    info["ranks"] = len(rank_vals)
+
+    # hub lanes: contiguous columns for each branch below a hub
+    lane = {t: -1 for t in graph}
+    bc = defaultdict(int)
+    for _, v in back:
+        bc[v] += 1
+    hub = None
+    if bc:
+        h = max(bc, key=lambda k: (bc[k], -disc[k]))
+        if bc[h] >= hub_min and len(dag_out[h]) >= 2:
+            hub = h
+    if hub:
+        info["hub"] = hub
+        q = deque()
+        for i, c in enumerate(dag_out[hub]):
+            if lane[c] == -1 and c != hub:
+                lane[c] = i
+                q.append(c)
+        while q:
+            u = q.popleft()
+            for v in dag_out[u]:
+                if lane[v] == -1 and v != hub:
+                    lane[v] = lane[u]
+                    q.append(v)
+        info["lanes"] = len(dag_out[hub])
+
+    # virtual nodes: real nodes first, then one dummy per skipped rank on long edges
+    vid = {t: i for i, t in enumerate(graph)}
+    rk = [ridx[rank_of[t]] for t in graph]
+    lane_l = [lane[t] for t in graph]
+    dkey = [float(disc[t]) for t in graph]
+    dum = [False] * len(graph)
+    par = [[] for _ in graph]
+    chi = [[] for _ in graph]
+    for u in graph:
+        a = vid[u]
+        for v in dag_out[u]:
+            b = vid[v]
+            prev = a
+            for r in range(rk[a] + 1, rk[b]):
+                d = len(rk)
+                rk.append(r)
+                lane_l.append(lane_l[a])
+                dkey.append(dkey[a] + 0.5)
+                dum.append(True)
+                par.append([])
+                chi.append([])
+                chi[prev].append(d)
+                par[d].append(prev)
+                prev = d
+            chi[prev].append(b)
+            par[b].append(prev)
+
+    rows = [[] for _ in rank_vals]
+    for v in range(len(rk)):
+        rows[rk[v]].append(v)
+    def tie(v):
+        return (1 if dum[v] else 0) if detour_left else (0 if dum[v] else 1)
+
+    for row in rows:
+        row.sort(key=lambda v: (lane_l[v], tie(v), dkey[v], v))
+
+    best = [list(r) for r in rows]
+    bestc = _count_crossings(rows, chi)
+    for it in range(30):
+        if bestc == 0:
+            break
+        down = it % 2 == 0
+        rng = range(1, len(rows)) if down else range(len(rows) - 2, -1, -1)
+        where = {}
+        for row in rows:
+            for i, v in enumerate(row):
+                where[v] = i
+        for r in rng:
+            keyed = []
+            for k, v in enumerate(rows[r]):
+                nb = par[v] if down else chi[v]
+                b = sum(where[w] for w in nb) / len(nb) if nb else k
+                keyed.append(((lane_l[v], b, tie(v), k), v))
+            keyed.sort()
+            rows[r] = [v for _, v in keyed]
+            for i, v in enumerate(rows[r]):
+                where[v] = i
+        c = _count_crossings(rows, chi)
+        if c < bestc:
+            best, bestc = [list(r) for r in rows], c
+    rows = best
+    info["order_crossings"] = bestc
+
+    # horizontal coordinates: iterate neighbor-weighted targets, then enforce order and spacing
+    def sepf(a, b):
+        if dum[a] and dum[b]:
+            return dx * 0.35
+        if dum[a] or dum[b]:
+            return dx * 0.75
+        return float(dx)
+
+    x = {}
+    for row in rows:
+        cur = 0.0
+        for i, v in enumerate(row):
+            if i:
+                cur += sepf(row[i - 1], v)
+            x[v] = cur
+
+    def solve(row, use_par, use_chi):
+        s, acc = [], 0.0
+        for i, v in enumerate(row):
+            if i:
+                acc += sepf(row[i - 1], v)
+            s.append(acc)
+        vals, wts = [], []
+        for i, v in enumerate(row):
+            num = den = 0.0
+            for nbs, use in ((par[v], use_par), (chi[v], use_chi)):
+                if use:
+                    for w in nbs:
+                        wt = 3.0 if (dum[v] or dum[w]) else 1.0
+                        num += wt * x[w]
+                        den += wt
+            if den:
+                vals.append(num / den - s[i])
+                wts.append(den)
+            else:
+                vals.append(x[v] - s[i])
+                wts.append(1e-3)
+        fit = _weighted_isotonic(vals, wts)
+        for i, v in enumerate(row):
+            x[v] = fit[i] + s[i]
+
+    for _ in range(12):
+        for r in range(1, len(rows)):
+            solve(rows[r], True, False)
+        for r in range(len(rows) - 2, -1, -1):
+            solve(rows[r], False, True)
+    for _ in range(4):
+        for r in range(len(rows)):
+            solve(rows[r], True, True)
+
+    real = {t: [x[vid[t]], rank_of[t] * dy] for t in graph}
+    minx = min(p[0] for p in real.values())
+    for p in real.values():
+        p[0] -= minx
+
+    # keep detours clear of neighboring cards: take the nearest free spot, preferring the detour side
+    for d in [t for t in graph if t in side]:
+        def clash(px):
+            return any(o != d and abs(real[o][0] - px) < NODE_W + 20 and abs(real[o][1] - real[d][1]) < NODE_H + 20
+                       for o in graph)
+        base = real[d][0]
+        for k in range(0, 400):
+            off = k * 20
+            cands = (-off, off) if detour_left else (off, -off)
+            hit = next((base + c for c in cands if not clash(base + c)), None)
+            if hit is not None:
+                real[d][0] = hit
+                break
+    lo = min(p[0] for p in real.values())
+    if lo < 0:
+        for p in real.values():
+            p[0] -= lo
+
+    first = starts[0] if starts else (roots[0] if roots else graph[0])
+    top = min(p[1] for p in real.values())
+    for t, p in real.items():
+        pos[t] = (p[0], p[1])
+    for k, t in enumerate(decl):
+        pos[t] = (real[first][0] + k * dx, top - dy)
+    miny = min(p[1] for p in pos.values())
+    pos = {t: (p[0], p[1] - miny) for t, p in pos.items()}
+    return pos, info
+
+
+def layout_metrics(pos, edges):
+    """Straight-line approximation of how the graph view draws edges (bottom port to top port)."""
+    segs = []
+    for u, v in edges:
+        if u in pos and v in pos and u != v:
+            segs.append((u, v, (pos[u][0] + NODE_W / 2, pos[u][1] + NODE_H),
+                         (pos[v][0] + NODE_W / 2, pos[v][1])))
+
+    def orient(a, b, c):
+        return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+
+    crossings = 0
+    if len(segs) <= 2000:
+        for i in range(len(segs)):
+            for j in range(i + 1, len(segs)):
+                u1, v1, p1, p2 = segs[i]
+                u2, v2, p3, p4 = segs[j]
+                if len({u1, v1, u2, v2}) < 4:
+                    continue
+                if orient(p1, p2, p3) * orient(p1, p2, p4) < 0 and orient(p3, p4, p1) * orient(p3, p4, p2) < 0:
+                    crossings += 1
+    ts = list(pos)
+    overlaps = 0
+    for i in range(len(ts)):
+        for j in range(i + 1, len(ts)):
+            a, b = pos[ts[i]], pos[ts[j]]
+            if abs(a[0] - b[0]) < NODE_W and abs(a[1] - b[1]) < NODE_H:
+                overlaps += 1
+    length = sum(((s[3][0] - s[2][0]) ** 2 + (s[3][1] - s[2][1]) ** 2) ** 0.5 for s in segs)
+    return {"crossings": crossings, "overlaps": overlaps, "edge_length": int(length)}
 
 
 def fmt_pos(x, y):
@@ -484,7 +776,7 @@ def cmd_layout(a):
     files = load(a.paths)
     for yf in files:
         nodes = yf.nodes
-        comp = compute_layout(nodes, a.dx, a.dy)
+        comp, info = build_layout(nodes, a.dx, a.dy, a.hub_min, a.detour_side == "left")
         have = [(n.title, n.position) for n in nodes if n.title in comp and n.position]
         offset = (0, 0)
         if have and not a.relayout:
@@ -497,19 +789,77 @@ def cmd_layout(a):
                 continue
             if a.relayout:
                 if (n.get("layout") or "").lower() == "pinned":
-                    occupied.append(n.position) if n.position else None
+                    if n.position:
+                        occupied.append(n.position)
                     continue
             elif n.position:
                 continue
             x, y = comp[n.title][0] + offset[0], comp[n.title][1] + offset[1]
-            while any(abs(x - ox) < a.dx * 0.8 and abs(y - oy) < a.dy * 0.8 for ox, oy in occupied):
+            while any(abs(x - ox) < NODE_W + 20 and abs(y - oy) < NODE_H + 20 for ox, oy in occupied):
                 y += a.dy
             occupied.append((x, y))
             n.set("position", fmt_pos(x, y))
             changed += 1
         if changed:
             yf.save()
-        print(f"{yf.path}: positioned {changed} node(s)")
+        line = f"{yf.path}: positioned {changed} node(s)"
+        if info["hub"]:
+            line += f"; hub '{info['hub']}' with {info['lanes']} lanes"
+        if info["detours"]:
+            line += f"; detours beside the spine: {', '.join(info['detours'])}"
+        print(line)
+        if a.report:
+            final = {n.title: n.position for n in yf.nodes if n.title and not n.is_note and n.position}
+            edges = [(n.title, t) for n in yf.nodes if n.title and not n.is_note for t in n.targets()]
+            fwd = [(u, v) for u, v in edges if u in final and v in final and final[v][1] > final[u][1]]
+            m_all, m_fwd = layout_metrics(final, edges), layout_metrics(final, fwd)
+            print(f"  report: {len(final)} nodes, {len(edges)} jumps ({len(edges) - len(fwd)} point back up); "
+                  f"edge crossings {m_all['crossings']} (forward jumps only: {m_fwd['crossings']}); "
+                  f"overlapping cards {m_all['overlaps']}")
+    return 0
+
+
+_SVG_COLORS = {"red": "#c24b4b", "green": "#3b8f3b", "blue": "#3b6fb6", "orange": "#d9822b",
+               "yellow": "#c9a92b", "purple": "#7a4fb0"}
+
+
+def cmd_preview(a):
+    files = load(a.paths)
+    nodes = [n for f in files for n in f.nodes if n.title and not n.is_note and n.position]
+    if not nodes:
+        die("no positioned nodes to draw; run `layout` first")
+    pos = {n.title: n.position for n in nodes}
+    pad = 60
+    minx = min(p[0] for p in pos.values()) - pad
+    miny = min(p[1] for p in pos.values()) - pad
+    maxx = max(p[0] for p in pos.values()) + NODE_W + pad
+    maxy = max(p[1] for p in pos.values()) + NODE_H + pad
+    out = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="{minx} {miny} {maxx - minx} {maxy - miny}" '
+           f'width="{(maxx - minx) * a.scale:.0f}" height="{(maxy - miny) * a.scale:.0f}" '
+           f'font-family="sans-serif"><rect x="{minx}" y="{miny}" width="{maxx - minx}" height="{maxy - miny}" fill="#1e2024"/>']
+    for n in nodes:
+        for t in n.targets():
+            if t not in pos:
+                continue
+            (x1, y1), (x2, y2) = pos[n.title], pos[t]
+            x1 += NODE_W / 2
+            y1 += NODE_H
+            x2 += NODE_W / 2
+            up = y2 <= y1
+            c = max(50.0, abs(y2 - y1) / 2)
+            style = 'stroke="#c66" stroke-opacity="0.35"' if up else 'stroke="#9ab" stroke-opacity="0.9"'
+            out.append(f'<path d="M{x1:.0f} {y1:.0f} C{x1:.0f} {y1 + c:.0f} {x2:.0f} {y2 - c:.0f} {x2:.0f} {y2:.0f}" '
+                       f'fill="none" stroke-width="2" {style}/>')
+    for n in nodes:
+        x, y = pos[n.title]
+        col = _SVG_COLORS.get((n.get("color") or "").lower(), "#777")
+        out.append(f'<rect x="{x:.0f}" y="{y:.0f}" width="{NODE_W}" height="{NODE_H}" rx="6" fill="#2a2d33" stroke="#444"/>'
+                   f'<rect x="{x:.0f}" y="{y:.0f}" width="{NODE_W}" height="8" rx="4" fill="{col}"/>'
+                   f'<text x="{x + 12:.0f}" y="{y + 34:.0f}" fill="#eee" font-size="15" font-weight="bold">{n.title}</text>')
+    out.append("</svg>")
+    with open(a.out, "w", encoding="utf-8") as fh:
+        fh.write("\n".join(out))
+    print(f"wrote {a.out} ({len(nodes)} nodes)")
     return 0
 
 
@@ -736,8 +1086,10 @@ def main():
     p = sub.add_parser("lint"); p.add_argument("paths", nargs="+"); p.add_argument("--ysc", action="store_true")
     p.set_defaults(fn=cmd_lint)
     p = sub.add_parser("layout"); p.add_argument("paths", nargs="+"); p.add_argument("--relayout", action="store_true")
-    p.add_argument("--dx", type=int, default=320); p.add_argument("--dy", type=int, default=200)
+    p.add_argument("--dx", type=int, default=300); p.add_argument("--dy", type=int, default=190)
+    p.add_argument("--hub-min", type=int, default=3); p.add_argument("--detour-side", choices=["left", "right"], default="left"); p.add_argument("--report", action="store_true")
     p.set_defaults(fn=cmd_layout)
+    p = sub.add_parser("preview"); p.add_argument("paths", nargs="+"); p.add_argument("--out", default="graph.svg"); p.add_argument("--scale", type=float, default=0.5); p.set_defaults(fn=cmd_preview)
     p = sub.add_parser("adopt"); p.add_argument("paths", nargs="+"); p.set_defaults(fn=cmd_adopt)
     p = sub.add_parser("colorize"); p.add_argument("paths", nargs="+"); p.add_argument("--force", action="store_true")
     p.set_defaults(fn=cmd_colorize)
